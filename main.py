@@ -1,8 +1,9 @@
-from datetime import datetime
 import os
 import re
 import openai
 import PyPDF2
+from tqdm import tqdm
+from datetime import datetime
 
 
 from settings import (
@@ -45,14 +46,11 @@ def split_pdf_into_chunks(
 
 
 def extract_from_file(assistant_id: str, file_path: str, retries: int = 1) -> str:
-    print('Processing File...')
     # Upload the user provided file to OpenAI
     message_file = client.files.create(
         file=open(file_path, 'rb'),
         purpose='assistants',
     )
-
-    print('Creating Thread...')
 
     # Create a thread and attach the file to the message
     thread = client.beta.threads.create(
@@ -69,8 +67,6 @@ def extract_from_file(assistant_id: str, file_path: str, retries: int = 1) -> st
             }
         ]
     )
-
-    print('Thread created. Starting assistant...')
 
     run = client.beta.threads.runs.create_and_poll(
         thread_id=thread.id,
@@ -119,8 +115,7 @@ if __name__ == '__main__':
     with open(f'{OUTPUT_DIR}/{now}.md', 'w') as f:
         f.write(f'# Extraction from {PATH_TO_PDF}\n\n')
 
-        for chunk in chunks:
+        for chunk in tqdm(chunks, desc='Extracting from chunks'):
             content = extract_from_file(assistant.id, chunk)
-            print(content)
             f.write(content + '\n\n--- END OF EXTRACTION ---\n\n')
             f.flush()
