@@ -1,18 +1,34 @@
+from datetime import datetime
+import os
+import re
 import openai
 import PyPDF2
 
-from settings import OPENAI_API_KEY, PATH_TO_PDF
 
-openai.api_key = OPENAI_API_KEY
+from settings2 import (
+    OPENAI_API_KEY,
+    PATH_TO_PDF,
+    PAGES_PER_CHUNK,
+    INITIAL_PAGES_TO_SKIP,
+    SYSTEM_PROMPT,
+    USER_PROMPT,
+    OUTPUT_DIR,
+)
+
+client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
 
-def split_pdf_into_chunks(pdf_path: str, pages_per_chunk: int = 10) -> list[str]:
+def split_pdf_into_chunks(
+    pdf_path: str,
+    pages_per_chunk: int = 10,
+    initial_pages_to_skip: int = 0,
+) -> list[str]:
     chunks = []
     with open(pdf_path, 'rb') as file:
         reader = PyPDF2.PdfReader(file)
         total_pages = len(reader.pages)
 
-        for start in range(0, total_pages, pages_per_chunk):
+        for start in range(initial_pages_to_skip, total_pages, pages_per_chunk):
             writer = PyPDF2.PdfWriter()
             end = min(start + pages_per_chunk, total_pages)
 
@@ -28,52 +44,83 @@ def split_pdf_into_chunks(pdf_path: str, pages_per_chunk: int = 10) -> list[str]
     return chunks
 
 
-if __name__ == '__main__':
-    chunks = split_pdf_into_chunks(PATH_TO_PDF, pages_per_chunk=10)
+def extract_from_file(assistant_id: str, file_path: str, retries: int = 1) -> str:
+    print('Processing File...')
+    # Upload the user provided file to OpenAI
+    message_file = client.files.create(
+        file=open(file_path, 'rb'),
+        purpose='assistants',
+    )
 
-    client = openai.OpenAI()
+    print('Creating Thread...')
+
+    # Create a thread and attach the file to the message
+    thread = client.beta.threads.create(
+        messages=[
+            {
+                'role': 'user',
+                'content': USER_PROMPT,
+                'attachments': [
+                    {
+                        'file_id': message_file.id,
+                        'tools': [{'type': 'file_search'}],
+                    }
+                ],
+            }
+        ]
+    )
+
+    print('Thread created. Starting assistant...')
+
+    run = client.beta.threads.runs.create_and_poll(
+        thread_id=thread.id,
+        assistant_id=assistant_id,
+        tool_choice='required',
+    )
+
+    if run.status != 'completed':
+        print('Run not completed.', run.status, run.last_error)
+        if retries > 0:
+            print('Retrying...')
+            return extract_from_file(assistant_id, file_path, retries - 1)
+        else:
+            print('Retries exhausted. Exiting...')
+            exit(1)
+
+    messages = list(client.beta.threads.messages.list(thread_id=thread.id, run_id=run.id))
+
+    message_content = messages[0].content[0].text.value  # type: ignore
+    # delete citations of the style: "【SOURCE】"
+    message_content = re.sub(r'【.*?】', '', message_content)
+    return message_content
+
+
+if __name__ == '__main__':
+    print('Splitting PDF into chunks...')
+    chunks = split_pdf_into_chunks(
+        PATH_TO_PDF,
+        pages_per_chunk=PAGES_PER_CHUNK,
+        initial_pages_to_skip=INITIAL_PAGES_TO_SKIP,
+    )
+    print('Done splitting PDF into chunks. Now creating assistant...')
 
     assistant = client.beta.assistants.create(
         name='Extraction Assistant',
-        instructions="""Bitte extrahiere aus der angegebenen PDF-Datei alle wesentlichen Definitionen, Formeln, Lemmas und Sätze. Das Output-Format soll Rich Markdown sein und die Formeln sollen in LaTeX eingefügt werden. Die Extraktion soll kompakt und präzise erfolgen, unter der Annahme, dass der Nutzer bereits mit dem Stoff vertraut ist. Ziel ist es, eine klare und prägnante Zusammenfassung zu bieten, die als schnelles Nachschlagewerk für jemanden dienen kann, der mit den Konzepten bereits vertraut ist. Als Beispiel für das gewünschte Format sieh dir die folgenden Einträge an:
-
-**Epigraph**  
-Der Epigraph besteht aus dem Graphen von f auf X sowie allen darüberliegenden Punkten.  
-Formal: $\\text{epi}(f, X) = \\{(x, \\alpha) \\in X \\times \\mathbb{R} \\mid f(x) \\leq \\alpha\\}$
-
-**Lösbarkeit**  
-Ein Minimierungsproblem ist lösbar, wenn das Infimum der Zielfunktion auf der zulässigen Menge tatsächlich angenommen wird.  
-Formal: Ein Problem ist lösbar, wenn ein $\\bar{x} \\in M$ existiert, sodass $\\inf_{x \\in M} f(x) = f(\\bar{x})$.
-
-Bitte achte darauf, dass alle Einträge in ähnlichem Stil präsentiert werden und die wesentlichen mathematischen Aspekte klar hervorgehoben werden.""",
+        instructions=SYSTEM_PROMPT,
         model='gpt-4-turbo',
         tools=[{'type': 'file_search'}],
     )
 
-    for chunk in chunks:
-        # Upload the user provided file to OpenAI
-        message_file = client.files.create(file=open(chunk, 'rb'), purpose='assistants')
+    print('Assistant created. Now uploading chunks...')
 
-        # Create a thread and attach the file to the message
-        thread = client.beta.threads.create(
-            messages=[
-                {
-                    'role': 'user',
-                    'content': """Ich möchte, dass du aus der beigefügten PDF-Datei alle wichtigen mathematischen Inhalte extrahierst, einschließlich Definitionen, Formeln, Lemmas und Sätze. Verwende Rich Markdown für die Formatierung und LaTeX für die mathematischen Formeln. Bitte orientiere dich am Format der Beispiele für Epigraph und Lösbarkeit, die ich dir gegeben habe. Die Informationen sollen so aufbereitet werden, dass sie für jemanden, der mit dem Thema bereits vertraut ist, als effiziente Zusammenfassung dienen können.""",
-                    # Attach the new file to the message.
-                    'attachments': [
-                        {
-                            'file_id': message_file.id,
-                            'tools': [{'type': 'file_search'}],
-                        }
-                    ],
-                }
-            ]
-        )
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    now = datetime.now().strftime('%Y-%m-%d %H-%M-%S')
 
-        with client.beta.threads.runs.stream(
-            thread_id=thread.id,
-            assistant_id=assistant.id,
-            tool_choice='required',
-        ) as stream:
-            stream.until_done()
+    with open(f'{OUTPUT_DIR}/{now}.md', 'w') as f:
+        f.write(f'# Extraction from {PATH_TO_PDF}\n\n')
+
+        for chunk in chunks:
+            content = extract_from_file(assistant.id, chunk)
+            print(content)
+            f.write(content + '\n\n--- END OF EXTRACTION ---\n\n')
+            f.flush()
