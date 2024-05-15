@@ -5,7 +5,7 @@ import openai
 import PyPDF2
 
 
-from settings2 import (
+from settings import (
     OPENAI_API_KEY,
     PATH_TO_PDF,
     PAGES_PER_CHUNK,

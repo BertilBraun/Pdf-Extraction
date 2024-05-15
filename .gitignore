@@ -1,3 +1,4 @@
+settings.py
 data/**
 output/**
 __pycache__/**
