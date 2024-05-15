@@ -2,9 +2,8 @@ import os
 import re
 import openai
 import PyPDF2
-from tqdm import tqdm
 from datetime import datetime
-
+from concurrent.futures import ThreadPoolExecutor
 
 from settings import (
     OPENAI_API_KEY,
@@ -14,6 +13,7 @@ from settings import (
     SYSTEM_PROMPT,
     USER_PROMPT,
     OUTPUT_DIR,
+    MAX_WORKERS,
 )
 
 client = openai.OpenAI(api_key=OPENAI_API_KEY)
@@ -75,7 +75,7 @@ def extract_from_file(assistant_id: str, file_path: str, retries: int = 1) -> st
     )
 
     if run.status != 'completed':
-        print('Run not completed.', run.status, run.last_error)
+        print('Run not completed.', file_path, 'Status:', run.status, 'Error:', run.last_error)
         if retries > 0:
             print('Retrying...')
             return extract_from_file(assistant_id, file_path, retries - 1)
@@ -98,7 +98,8 @@ if __name__ == '__main__':
         pages_per_chunk=PAGES_PER_CHUNK,
         initial_pages_to_skip=INITIAL_PAGES_TO_SKIP,
     )
-    print('Done splitting PDF into chunks. Now creating assistant...')
+    print('Done splitting PDF into chunks.')
+    print('Creating assistant...')
 
     assistant = client.beta.assistants.create(
         name='Extraction Assistant',
@@ -107,15 +108,28 @@ if __name__ == '__main__':
         tools=[{'type': 'file_search'}],
     )
 
-    print('Assistant created. Now uploading chunks...')
+    print('Assistant created.')
+
+    # Initialize list to hold content from each chunk
+    results = [''] * len(chunks)
+
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        # Map each chunk to a future object
+        future_to_index = {executor.submit(extract_from_file, assistant.id, chunk): i for i, chunk in enumerate(chunks)}
+
+        # As each future completes, place result at correct index
+        for future in future_to_index:
+            index = future_to_index[future]
+            results[index] = future.result()
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     now = datetime.now().strftime('%Y-%m-%d %H-%M-%S')
 
+    # Write all results to file, maintaining original order
     with open(f'{OUTPUT_DIR}/{now}.md', 'w') as f:
         f.write(f'# Extraction from {PATH_TO_PDF}\n\n')
-
-        for chunk in tqdm(chunks, desc='Extracting from chunks'):
-            content = extract_from_file(assistant.id, chunk)
-            f.write(content + '\n\n--- END OF EXTRACTION ---\n\n')
+        for result in results:
+            f.write(result + '\n\n--- END OF EXTRACTION ---\n\n')
             f.flush()
+
+    print('All chunks processed and saved in order.')

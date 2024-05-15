@@ -16,7 +16,6 @@ This Python script extracts key mathematical content from a specified PDF file a
 - Python 3.8 or higher
 - `openai`
 - `PyPDF2`
-- `tqdm`
 
 ## Setup
 

@@ -5,6 +5,7 @@ PAGES_PER_CHUNK = 10
 INITIAL_PAGES_TO_SKIP = 3
 
 OUTPUT_DIR = 'output'
+MAX_WORKERS = 10  # Don't set this too large as you might run into rate limits
 
 SYSTEM_PROMPT = """Bitte extrahiere aus der angegebenen PDF-Datei alle wesentlichen Definitionen, Formeln, Lemmas und Sätze. Das Output-Format soll Rich Markdown sein und die Formeln sollen in LaTeX eingefügt werden. Die Extraktion soll kompakt und präzise erfolgen, unter der Annahme, dass der Nutzer bereits mit dem Stoff vertraut ist. Ziel ist es, eine klare und prägnante Zusammenfassung zu bieten, die als schnelles Nachschlagewerk für jemanden dienen kann, der mit den Konzepten bereits vertraut ist. Dementsprechend sollte die Zusammenfassung auf das Wesentliche reduziert sein und unnötige Details vermeiden. Beispiele und Übungen sind nicht erforderlich.
 
