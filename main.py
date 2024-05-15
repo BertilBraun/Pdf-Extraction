@@ -88,6 +88,9 @@ def extract_from_file(assistant_id: str, file_path: str, retries: int = 1) -> st
     message_content = messages[0].content[0].text.value  # type: ignore
     # delete citations of the style: "【SOURCE】"
     message_content = re.sub(r'【.*?】', '', message_content)
+    # fix latex formatting
+    message_content = re.sub(r'\\(', '$', message_content)
+    message_content = re.sub(r'\\)', '$', message_content)
     return message_content
 
 
