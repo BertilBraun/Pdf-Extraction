@@ -3,6 +3,9 @@ PATH_TO_PDF = 'path_to_your_pdf.pdf'  # Replace with the path to your PDF file
 
 PAGES_PER_CHUNK = 10
 INITIAL_PAGES_TO_SKIP = 3
+LAST_PAGES_TO_SKIP = 7
+
+MODEL_ID = 'gpt-4o-mini'
 
 OUTPUT_DIR = 'output'
 MAX_WORKERS = 10  # Don't set this too large as you might run into rate limits
